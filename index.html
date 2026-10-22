@@ -179,17 +179,19 @@ button,input,select,textarea{font:inherit;color:inherit}
 @media (max-width: 1080px){
   .brand-name{display:none}
 }
+/* 平板直放（約 744–900px）：按鈕只留圖示，騰出空間保留橫式／直式與科判／心智圖切換 */
 @media (max-width: 900px){
-  .topbar .seg{display:none}
+  .topbar{gap:4px}
   .chip span{display:none}
+  .btn.txt-narrow-hide .lbl{display:none}
+  .btn.txt-narrow-hide{width:34px;padding:0}
+  .seg button{padding:0 8px}
 }
 @media (max-width: 760px){
   .topbar{gap:2px}
   .brand{display:none}
   .chip{display:none}
   .name-input{flex:1}
-  .btn.txt-narrow-hide .lbl{display:none}
-  .btn.txt-narrow-hide{width:34px;padding:0}
   .only-narrow{display:inline-flex}
   .outline{position:absolute;inset:0;width:auto;z-index:8;border-right:0}
   .panel{position:fixed;left:0;right:0;bottom:0;width:auto;max-height:72%;z-index:30;border-left:0;border-top:1px solid var(--rule);border-radius:14px 14px 0 0;box-shadow:var(--shadow);padding-bottom:env(safe-area-inset-bottom,0px);padding-left:env(safe-area-inset-left,0px);padding-right:env(safe-area-inset-right,0px)}
@@ -201,6 +203,7 @@ button,input,select,textarea{font:inherit;color:inherit}
   .nb{min-width:48px}
 }
 @media (max-width: 900px){ .chip[data-s="auth"] span{display:inline} }
+@media (max-width: 680px){ .topbar .seg{display:none} } /* 手機太窄，切換放在「設定 → 版面」 */
 @media (max-width: 760px){ .chip[data-s="auth"]{display:inline-flex} }
 @media (prefers-reduced-motion: reduce){ *{transition:none!important;animation:none!important} }
 </style>
@@ -1825,7 +1828,7 @@ const GD = {
   async api(url, opt = {}) {
     if (!GD.valid()) throw { code: 'auth' };
     const r = await fetch(url, Object.assign({}, opt, { headers: Object.assign({ Authorization: 'Bearer ' + GD.token }, opt.headers || {}) }));
-    if (r.status === 401) { GD.token = null; throw { code: 'auth' }; }
+    if (r.status === 401) { GD.token = null; try { sessionStorage.removeItem('kepan.gtok'); } catch (e) {} throw { code: 'auth' }; }
     if (r.status === 403 || r.status === 429 || r.status >= 500) throw { code: 'unavailable', status: r.status };
     if (!r.ok) throw { code: 'http', status: r.status };
     return r;
@@ -1862,13 +1865,47 @@ const GD = {
     await GD.api(`${GAPI}/${encodeURIComponent(fileId)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ trashed: true }) });
   },
 };
+// 手機上用彈出視窗登入常停在空白頁，所以手機改成整頁跳到 Google，登入後帶著 token 跳回本頁
+const UA = navigator.userAgent || '';
+const IN_APP = /\bLine\//i.test(UA) ? 'line' : /FBAN|FBAV|FB_IAB|Instagram|MicroMessenger|WhatsApp|; wv\)/i.test(UA) ? 'app' : '';
+const MOBILE = /Android|iPhone|iPad|iPod|Mobile/i.test(UA) || coarse();
+const gRedirectUri = () => location.origin + location.pathname.replace(/index\.html$/i, '');
+function gRedirectLogin() {
+  if (state.dirty) mirrorDraft(); // 跳頁前先把還沒存的內容留在這台裝置，回來時會接著存到雲端
+  const st = rid('s');
+  try { sessionStorage.setItem('kepan.gstate', st); } catch (e) {}
+  const p = new URLSearchParams({ client_id: GCLIENT, redirect_uri: gRedirectUri(), response_type: 'token', scope: 'https://www.googleapis.com/auth/drive.file', include_granted_scopes: 'true', state: st });
+  const email = loadPrefs().gEmail;
+  if (email) p.set('login_hint', email);
+  location.href = 'https://accounts.google.com/o/oauth2/v2/auth?' + p.toString();
+}
+function gTakeRedirectToken() { // 從 Google 跳回來時，網址 # 後面帶著 access_token
+  const hs = location.hash || '';
+  if (!/[#&](access_token|error)=/.test(hs)) return null;
+  const h = new URLSearchParams(hs.slice(1));
+  try { history.replaceState(null, '', location.pathname + location.search); } catch (e) {}
+  let expected = null;
+  try { expected = sessionStorage.getItem('kepan.gstate'); sessionStorage.removeItem('kepan.gstate'); } catch (e) {}
+  if (h.get('error')) return { error: h.get('error') };
+  if (!expected || h.get('state') !== expected || !h.get('access_token')) return { error: 'state_mismatch' };
+  GD.setToken({ access_token: h.get('access_token'), expires_in: h.get('expires_in') });
+  return { ok: true };
+}
 async function googleSignIn() {
   if (!GCLIENT) { toast('網站管理者還沒設定 Google 登入'); return; }
+  if (IN_APP === 'line') { // LINE 支援用這個參數改開手機瀏覽器
+    const u = new URL(location.href); u.searchParams.set('openExternalBrowser', '1');
+    toast('正在改用手機瀏覽器開啟，開好後請再按一次「登入」', 5000);
+    setTimeout(() => { location.href = u.toString(); }, 800);
+    return;
+  }
+  if (IN_APP) { toast('Google 不允許在 App 內建的瀏覽器登入。請按右上角「⋯」，選「在瀏覽器中開啟」後再登入', 7000); return; }
+  if (MOBILE) { gRedirectLogin(); return; }
   try { await GD.signIn(); }
   catch (e) {
     const c = e && e.code;
+    if (c === 'popup_failed_to_open') { gRedirectLogin(); return; } // 彈出視窗被擋，改用整頁跳轉
     if (c === 'nolib') toast('無法載入 Google 登入，請確認網路連線');
-    else if (c === 'popup_failed_to_open') toast('登入視窗被瀏覽器擋住了，請允許這個網站開啟彈出式視窗');
     else if (c !== 'popup_closed' && c !== 'access_denied') toast('Google 登入沒有完成');
     return;
   }
@@ -2066,7 +2103,15 @@ async function connectStorage() {
       : '離線版：內容只存在這台電腦的瀏覽器裡，不會同步。要備份或搬到別台電腦，請用「匯出 → 備份檔」，再到另一台按「匯入檔案」。';
     state.maps = listFromLocal(); renderMapList();
     afterStorageReady(state.maps);
-    if (WEBSITE) { updateAccountUI(); if (GCLIENT && GD.restore()) googleConnected(false); } // 同一個分頁重新整理時沿用登入
+    if (WEBSITE) {
+      updateAccountUI();
+      if (GCLIENT) {
+        const r = gTakeRedirectToken();
+        if (r && r.error) { if (r.error !== 'access_denied') toast('Google 登入沒有完成（' + r.error + '），請再試一次'); }
+        else if (r && r.ok) googleConnected(true); // 剛從 Google 登入頁跳回來
+        else if (GD.restore()) googleConnected(false); // 同一個分頁重新整理時沿用登入
+      }
+    }
   }
 }
 function afterStorageReady(list) {
@@ -2416,7 +2461,8 @@ function wordShapesForPage(L, pg, i, ids, fontName) {
       const jc = align === 'end' ? 'right' : align === 'center' ? 'center' : 'left';
       const sz = Math.max(2, Math.round(b.size * k * 2)), lineTw = Math.max(20, Math.round(b.pitch * k * 20));
       const sp = b.ls ? `<w:spacing w:val="${Math.round(b.ls * b.size * k * 20)}"/>` : '';
-      const rpr = `<w:rPr><w:rFonts w:ascii="${f}" w:hAnsi="${f}" w:eastAsia="${f}" w:cs="${f}"/>${b.weight >= 600 ? '<w:b/>' : ''}<w:color w:val="${hexColor(PRINT[t.color] || t.color).rgb}"/>${sp}<w:sz w:val="${sz}"/><w:szCs w:val="${sz}"/></w:rPr>`;
+      // noProof：不做拼字、文法檢查，否則直書時 Word 的檢查標記會疊在字上，看起來像多出來的線
+      const rpr = `<w:rPr><w:rFonts w:ascii="${f}" w:hAnsi="${f}" w:eastAsia="${f}" w:cs="${f}"/>${b.weight >= 600 ? '<w:b/>' : ''}<w:noProof/><w:color w:val="${hexColor(PRINT[t.color] || t.color).rgb}"/>${sp}<w:sz w:val="${sz}"/><w:szCs w:val="${sz}"/><w:lang w:val="zh-TW" w:eastAsia="zh-TW"/></w:rPr>`;
       const paras = b.lines.map((ln) => `<w:p><w:pPr><w:autoSpaceDE w:val="0"/><w:autoSpaceDN w:val="0"/><w:snapToGrid w:val="0"/><w:spacing w:before="0" w:after="0" w:line="${lineTw}" w:lineRule="exact"/><w:jc w:val="${jc}"/></w:pPr><w:r>${rpr}<w:t xml:space="preserve">${xmlEsc(ln.units.map((u) => u.t).join(''))}</w:t></w:r></w:p>`).join('');
       out.text += anchor(r, `<wps:wsp><wps:cNvSpPr txBox="1"/><wps:spPr>${xfrm(r)}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/><a:ln><a:noFill/></a:ln></wps:spPr><wps:txbx><w:txbxContent>${paras}</w:txbxContent></wps:txbx><wps:bodyPr rot="0" vert="${horiz ? 'horz' : 'eaVert'}" wrap="square" lIns="0" tIns="0" rIns="0" bIns="0" anchor="t" anchorCtr="0" upright="0"><a:noAutofit/></wps:bodyPr></wps:wsp>`, 3000);
     }
@@ -2438,7 +2484,7 @@ function buildDocx(opt) {
   let finalSect = sect(pg.pw, pg.ph, false, false);
   if (outline) {
     const f = xmlEsc(outline.font);
-    const run = (t, sz, b, color) => `<w:r><w:rPr><w:rFonts w:ascii="${f}" w:hAnsi="${f}" w:eastAsia="${f}"/>${b ? '<w:b/>' : ''}${color ? `<w:color w:val="${color}"/>` : ''}<w:sz w:val="${sz}"/><w:szCs w:val="${sz}"/></w:rPr><w:t xml:space="preserve">${xmlEsc(t)}</w:t></w:r>`;
+    const run = (t, sz, b, color) => `<w:r><w:rPr><w:rFonts w:ascii="${f}" w:hAnsi="${f}" w:eastAsia="${f}"/>${b ? '<w:b/>' : ''}<w:noProof/>${color ? `<w:color w:val="${color}"/>` : ''}<w:sz w:val="${sz}"/><w:szCs w:val="${sz}"/><w:lang w:val="zh-TW" w:eastAsia="zh-TW"/></w:rPr><w:t xml:space="preserve">${xmlEsc(t)}</w:t></w:r>`;
     const clean = (s) => s.replace(/\n/g, '');
     body += `<w:p><w:pPr><w:spacing w:before="0" w:after="240"/><w:jc w:val="center"/></w:pPr>${run(clean(outline.root.text), 32, true)}</w:p>`;
     if (outline.author) body += `<w:p><w:pPr><w:spacing w:before="0" w:after="240"/><w:jc w:val="right"/></w:pPr>${run(outline.author, 22)}</w:p>`;
@@ -2635,7 +2681,8 @@ function boot() {
   setMap(m, { keepDirty: true });
   setChip('pending');
   const prefs = loadPrefs();
-  if (narrow() || prefs.panel === false) $('#panel').hidden = true;
+  // 手機與平板直放時，預設收起右側屬性欄，讓畫布大一點（按「設定」可再打開）
+  if (narrow() || prefs.panel === false || (prefs.panel === undefined && innerWidth <= 900)) $('#panel').hidden = true;
   setTab('node');
   updateButtons();
   connectStorage();
