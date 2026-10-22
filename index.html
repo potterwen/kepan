@@ -2420,13 +2420,14 @@ function wordShapesForPage(L, pg, i, ids, fontName) {
   const xfrm = (r, flip) => `<a:xfrm${flip ? ' flipH="1"' : ''}><a:off x="0" y="0"/><a:ext cx="${emu(r.w)}" cy="${emu(r.h)}"/></a:xfrm>`;
   const out = { box: '', line: '', text: '' };
   const f = xmlEsc(fontName);
-  // 一段文字 → Word 段落（每一行一段，固定行距；noProof：不做拼字、文法檢查，否則直書時檢查標記會疊在字上）
+  // 一段文字 → Word 段落（每一行一段；noProof：不做拼字、文法檢查，否則直書時檢查標記會疊在字上）
+  // 行距用「最小行高」（atLeast）而不是「固定行高」：固定行高時，字型需要的空間比行距大，Word 會把字切掉一半
   const parasFor = (t, jc) => {
     const b = t.block;
     const sz = Math.max(2, Math.round(b.size * k * 2)), lineTw = Math.max(20, Math.round(b.pitch * k * 20));
     const sp = b.ls ? `<w:spacing w:val="${Math.round(b.ls * b.size * k * 20)}"/>` : '';
     const rpr = `<w:rPr><w:rFonts w:ascii="${f}" w:hAnsi="${f}" w:eastAsia="${f}" w:cs="${f}"/>${b.weight >= 600 ? '<w:b/>' : ''}<w:noProof/><w:color w:val="${hexColor(PRINT[t.color] || t.color).rgb}"/>${sp}<w:sz w:val="${sz}"/><w:szCs w:val="${sz}"/><w:lang w:val="zh-TW" w:eastAsia="zh-TW"/></w:rPr>`;
-    return b.lines.map((ln) => `<w:p><w:pPr><w:autoSpaceDE w:val="0"/><w:autoSpaceDN w:val="0"/><w:snapToGrid w:val="0"/><w:spacing w:before="0" w:after="0" w:line="${lineTw}" w:lineRule="exact"/><w:jc w:val="${jc}"/></w:pPr><w:r>${rpr}<w:t xml:space="preserve">${xmlEsc(ln.units.map((u) => u.t).join(''))}</w:t></w:r></w:p>`).join('');
+    return b.lines.map((ln) => `<w:p><w:pPr><w:autoSpaceDE w:val="0"/><w:autoSpaceDN w:val="0"/><w:snapToGrid w:val="0"/><w:spacing w:before="0" w:after="0" w:line="${lineTw}" w:lineRule="atLeast"/><w:jc w:val="${jc}"/></w:pPr><w:r>${rpr}<w:t xml:space="preserve">${xmlEsc(ln.units.map((u) => u.t).join(''))}</w:t></w:r></w:p>`).join('');
   };
   for (const S of [L].concat(L.withDrafts ? L.drafts : [])) {
     for (const b of S.boxes) {
@@ -2492,7 +2493,7 @@ function wordShapesForPage(L, pg, i, ids, fontName) {
       // Word 的字寬和畫面略有不同，主軸方向留一點餘裕，避免多折一行
       const slack = b.size * 1.6 + (mx - mn) * 0.06, align = t.align || 'start';
       if (align === 'end') mn -= slack; else if (align === 'center') { mn -= slack / 2; mx += slack / 2; } else mx += slack;
-      const r = rect([P(mn, ca), P(mx, cb + b.pitch * 0.2)]);
+      const r = rect([P(mn, ca), P(mx, cb + b.pitch * 0.8)]); // 交叉軸也多留一些，萬一行距被字型撐大也不會被框切掉
       const jc = align === 'end' ? 'right' : align === 'center' ? 'center' : 'left';
       const paras = parasFor(t, jc);
       out.text += anchor(r, `<wps:wsp><wps:cNvSpPr txBox="1"/><wps:spPr>${xfrm(r)}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/><a:ln><a:noFill/></a:ln></wps:spPr><wps:txbx><w:txbxContent>${paras}</w:txbxContent></wps:txbx><wps:bodyPr rot="0" vert="${horiz ? 'horz' : 'eaVert'}" wrap="square" lIns="0" tIns="0" rIns="0" bIns="0" anchor="t" anchorCtr="0" upright="0"><a:noAutofit/></wps:bodyPr></wps:wsp>`, 3000);
