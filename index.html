@@ -780,15 +780,20 @@ function computeLayout(map) {
     } else {
       const bc = 'b' + it.branch;
       const r = mapR(it.main, it.top, it.labelM, it.labelC);
-      if (it.depth === 0) Bx.push(Object.assign({ r: fs * 0.5, fill: 'ink' }, r));
-      else if (it.depth === 1) Bx.push(Object.assign({ r: fs * 0.42, fill: bc }, r));
-      else Bx.push(Object.assign({ r: fs * 0.34, fill: bc + 't', stroke: bc, sw: Math.max(1, fs * 0.06) }, r));
+      const box = it.depth === 0 ? Object.assign({ r: fs * 0.5, fill: 'ink' }, r)
+        : it.depth === 1 ? Object.assign({ r: fs * 0.42, fill: bc }, r)
+        : Object.assign({ r: fs * 0.34, fill: bc + 't', stroke: bc, sw: Math.max(1, fs * 0.06) }, r);
+      Bx.push(box);
       const col = it.empty ? 'muted' : it.depth === 0 ? 'paper' : it.depth === 1 ? 'onBranch' : 'ink';
-      text(it.label, it.main + it.padM, it.top + it.padC, col, 'start', it.empty ? { screenOnly: true } : null);
+      // 匯出 Word 時，文字直接放進外框裡（box.label），移動外框時文字會跟著走
+      box.label = text(it.label, it.main + it.padM, it.top + it.padC, col, 'start', it.empty ? { screenOnly: true } : null);
+      box.label.inBox = true; box.inset = { m: it.padM, c: it.padC };
       if (it.note) {
         const nr = mapR(it.noteM, it.top, it.note.mainLen + 2 * it.notePad, it.noteC);
-        Bx.push(Object.assign({ r: fs * 0.3, fill: 'noteBox', stroke: 'muted', sw: Math.max(1, fs * 0.05), dash: [fs * 0.3, fs * 0.2] }, nr));
-        text(it.note, it.noteM + it.notePad, it.top + it.notePad, 'ink', 'start');
+        const nbox = Object.assign({ r: fs * 0.3, fill: 'noteBox', stroke: 'muted', sw: Math.max(1, fs * 0.05), dash: [fs * 0.3, fs * 0.2] }, nr);
+        Bx.push(nbox);
+        nbox.label = text(it.note, it.noteM + it.notePad, it.top + it.notePad, 'ink', 'start');
+        nbox.label.inBox = true; nbox.inset = { m: it.notePad, c: it.notePad };
         leader(it.main + it.labelM + fs * 0.15, it.anchor, it.noteM - fs * 0.15, it.depth === 0 ? 'muted' : bc);
       }
       for (const k of it.kids) {
@@ -2415,6 +2420,14 @@ function wordShapesForPage(L, pg, i, ids, fontName) {
   const xfrm = (r, flip) => `<a:xfrm${flip ? ' flipH="1"' : ''}><a:off x="0" y="0"/><a:ext cx="${emu(r.w)}" cy="${emu(r.h)}"/></a:xfrm>`;
   const out = { box: '', line: '', text: '' };
   const f = xmlEsc(fontName);
+  // 一段文字 → Word 段落（每一行一段，固定行距；noProof：不做拼字、文法檢查，否則直書時檢查標記會疊在字上）
+  const parasFor = (t, jc) => {
+    const b = t.block;
+    const sz = Math.max(2, Math.round(b.size * k * 2)), lineTw = Math.max(20, Math.round(b.pitch * k * 20));
+    const sp = b.ls ? `<w:spacing w:val="${Math.round(b.ls * b.size * k * 20)}"/>` : '';
+    const rpr = `<w:rPr><w:rFonts w:ascii="${f}" w:hAnsi="${f}" w:eastAsia="${f}" w:cs="${f}"/>${b.weight >= 600 ? '<w:b/>' : ''}<w:noProof/><w:color w:val="${hexColor(PRINT[t.color] || t.color).rgb}"/>${sp}<w:sz w:val="${sz}"/><w:szCs w:val="${sz}"/><w:lang w:val="zh-TW" w:eastAsia="zh-TW"/></w:rPr>`;
+    return b.lines.map((ln) => `<w:p><w:pPr><w:autoSpaceDE w:val="0"/><w:autoSpaceDN w:val="0"/><w:snapToGrid w:val="0"/><w:spacing w:before="0" w:after="0" w:line="${lineTw}" w:lineRule="exact"/><w:jc w:val="${jc}"/></w:pPr><w:r>${rpr}<w:t xml:space="preserve">${xmlEsc(ln.units.map((u) => u.t).join(''))}</w:t></w:r></w:p>`).join('');
+  };
   for (const S of [L].concat(L.withDrafts ? L.drafts : [])) {
     for (const b of S.boxes) {
       const A = toMC(b.x, b.y), B = toMC(b.x + b.w, b.y + b.h);
@@ -2423,7 +2436,15 @@ function wordShapesForPage(L, pg, i, ids, fontName) {
       const adj = Math.round(Math.min(50000, (b.r * k) / Math.max(0.1, Math.min(r.w, r.h)) * 100000));
       const fill = b.fill ? `<a:solidFill>${clr(b.fill)}</a:solidFill>` : '<a:noFill/>';
       const ln = b.stroke ? lnXml(b.sw * k, b.stroke, b.dash ? 'dash' : null, 'flat') : '<a:ln><a:noFill/></a:ln>';
-      out.box += anchor(r, `<wps:wsp><wps:cNvSpPr/><wps:spPr>${xfrm(r)}<a:prstGeom prst="roundRect"><a:avLst><a:gd name="adj" fmla="val ${adj}"/></a:avLst></a:prstGeom>${fill}${ln}</wps:spPr><wps:bodyPr/></wps:wsp>`, 1000);
+      let txt = '<wps:bodyPr/>';
+      if (b.label && !b.label.screenOnly) {
+        // 文字放在外框裡：交叉軸置中（Word 會自動把直書的欄、橫書的行放在框的正中間），主軸留和畫面一樣的內距
+        // 交叉軸不留內距（留了會讓 Word 空間不夠而把字擠扁），改用置中；主軸留和畫面一樣的內距
+        const im = emu(b.inset.m * k);
+        const ins = horiz ? `lIns="${im}" rIns="${im}" tIns="0" bIns="0"` : `lIns="0" rIns="0" tIns="${im}" bIns="${im}"`;
+        txt = `<wps:txbx><w:txbxContent>${parasFor(b.label, 'left')}</w:txbxContent></wps:txbx><wps:bodyPr rot="0" vert="${horiz ? 'horz' : 'eaVert'}" wrap="none" ${ins} anchor="ctr" anchorCtr="0" upright="0"><a:noAutofit/></wps:bodyPr>`;
+      }
+      out.box += anchor(r, `<wps:wsp><wps:cNvSpPr/><wps:spPr>${xfrm(r)}<a:prstGeom prst="roundRect"><a:avLst><a:gd name="adj" fmla="val ${adj}"/></a:avLst></a:prstGeom>${fill}${ln}</wps:spPr>${txt}</wps:wsp>`, 1000);
     }
     for (const l of S.lines) {
       const A0 = toMC(l.x1, l.y1), B0 = toMC(l.x2, l.y2);
@@ -2440,15 +2461,29 @@ function wordShapesForPage(L, pg, i, ids, fontName) {
       out.line += anchor(r, `<wps:wsp><wps:cNvCnPr/><wps:spPr>${xfrm(r, flip)}<a:prstGeom prst="line"><a:avLst/></a:prstGeom>${lnXml(l.w * k, l.color, dash, l.cap)}</wps:spPr><wps:bodyPr/></wps:wsp>`, 2000);
     }
     for (const cv of S.curves) {
-      const q = []; for (let j = 0; j < 8; j += 2) q.push(toMC(cv.p[j], cv.p[j + 1]));
-      if (!inPage((q[0][1] + q[3][1]) / 2)) continue;
+      let q = []; for (let j = 0; j < 8; j += 2) q.push(toMC(cv.p[j], cv.p[j + 1]));
+      if (Math.max(q[0][1], q[3][1]) < c0 - 0.01 || Math.min(q[0][1], q[3][1]) > c1 + 0.01) continue;
+      // 跨頁的曲線：在頁邊把貝茲曲線切開，只留這一頁的部分（曲線在交叉軸方向是單調的）
+      const evalC = (s, t) => { const u = 1 - t; return u * u * u * s[0][1] + 3 * u * u * t * s[1][1] + 3 * u * t * t * s[2][1] + t * t * t * s[3][1]; };
+      const lerp = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+      for (const edge of [c0, c1]) {
+        const a = q[0][1], b2 = q[3][1];
+        if ((a - edge) * (b2 - edge) >= 0) continue;
+        let lo = 0, hi = 1; const inc = b2 > a;
+        for (let n = 0; n < 40; n++) { const mid = (lo + hi) / 2; if ((evalC(q, mid) < edge) === inc) lo = mid; else hi = mid; }
+        const t = (lo + hi) / 2;
+        const p01 = lerp(q[0], q[1], t), p12 = lerp(q[1], q[2], t), p23 = lerp(q[2], q[3], t);
+        const p012 = lerp(p01, p12, t), p123 = lerp(p12, p23, t), mid = lerp(p012, p123, t);
+        const startInside = edge === c0 ? a > edge : a < edge;
+        q = startInside ? [q[0], p01, p012, mid] : [mid, p123, p23, q[3]];
+      }
       const pp = q.map((x) => P(...x)), r = rect(pp);
       const W = Math.max(1, emu(r.w)), H = Math.max(1, emu(r.h));
       const pt = (p) => `<a:pt x="${emu(p[0] - r.x)}" y="${emu(p[1] - r.y)}"/>`;
       out.line += anchor(r, `<wps:wsp><wps:cNvSpPr/><wps:spPr>${xfrm(r)}<a:custGeom><a:avLst/><a:gdLst/><a:ahLst/><a:cxnLst/><a:rect l="0" t="0" r="r" b="b"/><a:pathLst><a:path w="${W}" h="${H}" fill="none"><a:moveTo>${pt(pp[0])}</a:moveTo><a:cubicBezTo>${pt(pp[1])}${pt(pp[2])}${pt(pp[3])}</a:cubicBezTo></a:path></a:pathLst></a:custGeom><a:noFill/>${lnXml(cv.w * k, cv.color, null, 'round')}</wps:spPr><wps:bodyPr/></wps:wsp>`, 2000);
     }
     for (const t of S.texts) {
-      if (t.screenOnly) continue;
+      if (t.screenOnly || t.inBox) continue; // 外框裡的文字已經跟外框一起輸出
       const b = t.block, ca = t.top, cb = t.top + b.crossLen;
       if (!inPage((ca + cb) / 2)) continue;
       let mn = Infinity, mx = -Infinity;
@@ -2459,11 +2494,7 @@ function wordShapesForPage(L, pg, i, ids, fontName) {
       if (align === 'end') mn -= slack; else if (align === 'center') { mn -= slack / 2; mx += slack / 2; } else mx += slack;
       const r = rect([P(mn, ca), P(mx, cb + b.pitch * 0.2)]);
       const jc = align === 'end' ? 'right' : align === 'center' ? 'center' : 'left';
-      const sz = Math.max(2, Math.round(b.size * k * 2)), lineTw = Math.max(20, Math.round(b.pitch * k * 20));
-      const sp = b.ls ? `<w:spacing w:val="${Math.round(b.ls * b.size * k * 20)}"/>` : '';
-      // noProof：不做拼字、文法檢查，否則直書時 Word 的檢查標記會疊在字上，看起來像多出來的線
-      const rpr = `<w:rPr><w:rFonts w:ascii="${f}" w:hAnsi="${f}" w:eastAsia="${f}" w:cs="${f}"/>${b.weight >= 600 ? '<w:b/>' : ''}<w:noProof/><w:color w:val="${hexColor(PRINT[t.color] || t.color).rgb}"/>${sp}<w:sz w:val="${sz}"/><w:szCs w:val="${sz}"/><w:lang w:val="zh-TW" w:eastAsia="zh-TW"/></w:rPr>`;
-      const paras = b.lines.map((ln) => `<w:p><w:pPr><w:autoSpaceDE w:val="0"/><w:autoSpaceDN w:val="0"/><w:snapToGrid w:val="0"/><w:spacing w:before="0" w:after="0" w:line="${lineTw}" w:lineRule="exact"/><w:jc w:val="${jc}"/></w:pPr><w:r>${rpr}<w:t xml:space="preserve">${xmlEsc(ln.units.map((u) => u.t).join(''))}</w:t></w:r></w:p>`).join('');
+      const paras = parasFor(t, jc);
       out.text += anchor(r, `<wps:wsp><wps:cNvSpPr txBox="1"/><wps:spPr>${xfrm(r)}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/><a:ln><a:noFill/></a:ln></wps:spPr><wps:txbx><w:txbxContent>${paras}</w:txbxContent></wps:txbx><wps:bodyPr rot="0" vert="${horiz ? 'horz' : 'eaVert'}" wrap="square" lIns="0" tIns="0" rIns="0" bIns="0" anchor="t" anchorCtr="0" upright="0"><a:noAutofit/></wps:bodyPr></wps:wsp>`, 3000);
     }
   }
