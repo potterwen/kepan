@@ -176,6 +176,13 @@ button,input,select,textarea{font:inherit;color:inherit}
 #exInfo{flex:1;font-size:12.5px;color:var(--muted)}
 .toast{position:fixed;left:50%;bottom:calc(84px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:60;background:var(--ink);color:var(--paper);padding:9px 16px;border-radius:8px;font-size:13.5px;box-shadow:var(--shadow);max-width:calc(100% - 32px);text-align:center}
 .only-narrow{display:none}
+.btn.spin svg{animation:kspin .9s linear infinite}
+@keyframes kspin{to{transform:rotate(360deg)}}
+.add-para{margin-top:8px}
+.modal-card.small{width:min(480px,100%);height:auto;border-radius:12px;border:1px solid var(--rule)}
+#conflictModal{padding:16px}
+.cf-list{margin:0;padding-left:20px;font-size:13.5px;line-height:1.75;color:var(--ink-2)}
+.cf-acts{flex-wrap:wrap;justify-content:flex-end}
 
 @media (max-width: 1080px){
   .brand-name{display:none}
@@ -227,6 +234,7 @@ button,input,select,textarea{font:inherit;color:inherit}
     <button class="btn icon" id="btnRedo" title="重做（Ctrl+Shift+Z）" aria-label="重做"><svg viewBox="0 0 24 24"><path d="m15 14 5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/></svg></button>
     <button class="btn txt-narrow-hide" id="btnOutline" title="大綱編輯" aria-label="大綱編輯"><svg viewBox="0 0 24 24"><path d="M8 6h12M12 12h8M12 18h8"/><path d="M4 6h.01M8 12h.01M8 18h.01"/></svg><span class="lbl">大綱</span></button>
     <button class="btn txt-narrow-hide" id="btnPanel" title="屬性與版面" aria-label="屬性與版面"><svg viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg><span class="lbl">設定</span></button>
+    <button class="btn txt-narrow-hide" id="btnSync" hidden title="立即同步：把這台的修改存到雲端，並載入另一台裝置的最新內容" aria-label="立即同步"><svg viewBox="0 0 24 24"><path d="M19.5 10A8 8 0 0 0 5.2 7.2L4 8.5"/><path d="M4 4v4.5h4.5"/><path d="M4.5 14a8 8 0 0 0 14.3 2.8l1.2-1.3"/><path d="M20 20v-4.5h-4.5"/></svg><span class="lbl">同步</span></button>
     <button class="btn ghost txt-narrow-hide" id="btnGoogle" hidden title="用 Google 帳號登入，科判會存到你自己的雲端硬碟" aria-label="用 Google 帳號登入"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.5"/><path d="M5 20c1.2-3.6 4-5.5 7-5.5s5.8 1.9 7 5.5"/></svg><span class="lbl">登入</span></button>
     <button class="btn primary txt-narrow-hide" id="btnExport" title="匯出 PNG／PDF／Word" aria-label="匯出"><svg viewBox="0 0 24 24"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg><span class="lbl">匯出</span></button>
   </header>
@@ -247,6 +255,7 @@ button,input,select,textarea{font:inherit;color:inherit}
         <div class="dock-actions">
           <button class="btn ghost" data-dock="sibling">＋同層</button>
           <button class="btn ghost" data-dock="child">＋下一層</button>
+          <button class="btn ghost" data-dock="para" hidden>＋再加一段內文</button>
           <button class="btn primary" data-dock="done">完成</button>
         </div>
       </div>
@@ -285,7 +294,8 @@ button,input,select,textarea{font:inherit;color:inherit}
           <label class="field">標題<textarea id="fText" rows="2" spellcheck="false"></textarea></label>
         </div>
         <div id="nodeForm2" hidden>
-          <label class="field"><span>內文（經文、出處或說明）<br><small>顯示在標題後方，以引線相連；在科判樣式會對齊成一欄</small></span><textarea id="fNote" rows="8" spellcheck="false"></textarea></label>
+          <label class="field"><span>內文（經文、出處或說明）<br><small>顯示在標題後方，以引線相連；在科判樣式會對齊成一欄。同一項要放好幾段內文，按下面的按鈕，或在兩段中間空一行。</small></span><textarea id="fNote" rows="8" spellcheck="false"></textarea></label>
+          <button class="btn ghost add-para" id="btnAddPara" type="button"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>再加一段內文</button>
         </div>
         <details class="keys" id="keysBox">
           <summary>鍵盤快速鍵</summary>
@@ -369,6 +379,25 @@ button,input,select,textarea{font:inherit;color:inherit}
     <div class="modal-foot"><span id="exInfo"></span><button class="btn primary" id="exGo">下載</button></div>
   </div>
 </div>
+<div class="modal" id="conflictModal" hidden role="dialog" aria-modal="true" aria-labelledby="cfTitle">
+  <div class="modal-card small">
+    <div class="modal-head"><h2 id="cfTitle">另一台裝置也改過這份科判</h2></div>
+    <div class="modal-body">
+      <p class="hint">這台打開之後，另一台裝置（電腦或 iPad）又存了新的內容。兩邊的修改沒辦法自動合併，請選一種做法：</p>
+      <ul class="cf-list">
+        <li><b>兩份都留</b>：這台的內容另存成一份新的科判，原本那份是另一台的版本。</li>
+        <li><b>載入另一台的版本</b>：放棄這台剛剛的修改。</li>
+        <li><b>用這台的覆蓋</b>：另一台的修改會被蓋掉。</li>
+      </ul>
+    </div>
+    <div class="modal-foot cf-acts">
+      <button class="btn ghost" data-cf="mine">用這台的覆蓋</button>
+      <button class="btn ghost" data-cf="theirs">載入另一台的版本</button>
+      <button class="btn primary" data-cf="keep">兩份都留</button>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast" hidden role="status" aria-live="polite"></div>
 
 <script>
@@ -569,6 +598,8 @@ function unitAdv(u, fam, w, size, orient) {
   if (u.k === 's') return Math.max(tw(fam, w, ' ') * size, size * 0.25);
   return tw(fam, w, u.t) * size;
 }
+// 內文中間空一行（或按「＋再加一段內文」）就分成另一段
+const noteSegments = (s) => String(s || '').replace(/\r/g, '').split(/\n[ \t　]*\n/).map((x) => x.trim()).filter(Boolean);
 function layoutText(text, o) {
   const { fam, weight, size, orient, pitch } = o;
   const max = o.max > 0 ? o.max : Infinity;
@@ -645,10 +676,20 @@ function computeLayout(map) {
     if (!it.hidden) {
       it.empty = !n.text.trim();
       it.label = layoutText(it.empty ? '（空白）' : n.text, { fam, weight: it.weight, size: it.size, orient: O, max: S.labelWrap > 0 ? S.labelWrap * it.size : 0, pitch: it.pitch });
-      if (n.note.trim()) {
+      const segs = noteSegments(n.note);
+      if (segs.length) {
+        // 內文中間空一行，就分成好幾段，每段各自排成一塊、各有引線（沿交叉軸依序排開）
         const ns = kep ? fs : fs * 0.88;
-        it.note = layoutText(n.note.trim(), { fam, weight: 400, size: ns, orient: O, max: S.noteWrap > 0 ? S.noteWrap * ns : 0, pitch: kep ? P : ns * 1.5 });
+        const opt = { fam, weight: 400, size: ns, orient: O, max: S.noteWrap > 0 ? S.noteWrap * ns : 0, pitch: kep ? P : ns * 1.5 };
         it.notePad = kep ? 0 : fs * 0.5;
+        let off = 0, ml = 0;
+        it.noteSegs = segs.map((s, i) => {
+          const b = layoutText(s, opt);
+          if (i) off += kep ? fs * 0.7 : fs * 0.5;
+          const seg = { b, off }; off += b.crossLen + 2 * it.notePad; ml = Math.max(ml, b.mainLen);
+          return seg;
+        });
+        it.note = { mainLen: ml, crossLen: off - 2 * it.notePad };
       }
     }
     if (n.children.length && !n.collapsed) n.children.forEach((c, i) => it.kids.push(mk(c, depth + 1, it, depth === 0 ? i % nb : branch)));
@@ -771,8 +812,13 @@ function computeLayout(map) {
     if (kep) {
       if (!it.hidden) text(it.label, it.main, it.top, it.empty ? 'muted' : 'ink', 'start', it.empty ? { screenOnly: true } : null);
       if (it.note) {
-        text(it.note, it.noteM, it.top, 'ink', 'start');
+        for (const s of it.noteSegs) text(s.b, it.noteM, it.top + s.off, 'ink', 'start');
         leader(it.main + it.labelM + fs * 0.25, it.anchor, it.noteM - fs * 0.3, 'ink');
+        if (it.noteSegs.length > 1) { // 好幾段內文：從標題的引線分岔，用括號線接到每一段
+          const sp = it.main + it.labelM + fs * 0.75, segA = (s) => it.top + s.off + it.pitch / 2;
+          line(sp, it.anchor, sp, segA(it.noteSegs[it.noteSegs.length - 1]), lw, 'ink', null, 'square');
+          for (const s of it.noteSegs.slice(1)) leader(sp + fs * 0.25, segA(s), it.noteM - fs * 0.3, 'ink');
+        }
       }
       if (it.kids.length) {
         const cm = it.kids[0].main, sp = cm - tick;
@@ -793,12 +839,18 @@ function computeLayout(map) {
       box.label = text(it.label, it.main + it.padM, it.top + it.padC, col, 'start', it.empty ? { screenOnly: true } : null);
       box.label.inBox = true; box.inset = { m: it.padM, c: it.padC };
       if (it.note) {
-        const nr = mapR(it.noteM, it.top, it.note.mainLen + 2 * it.notePad, it.noteC);
-        const nbox = Object.assign({ r: fs * 0.3, fill: 'noteBox', stroke: 'muted', sw: Math.max(1, fs * 0.05), dash: [fs * 0.3, fs * 0.2] }, nr);
-        Bx.push(nbox);
-        nbox.label = text(it.note, it.noteM + it.notePad, it.top + it.notePad, 'ink', 'start');
-        nbox.label.inBox = true; nbox.inset = { m: it.notePad, c: it.notePad };
-        leader(it.main + it.labelM + fs * 0.15, it.anchor, it.noteM - fs * 0.15, it.depth === 0 ? 'muted' : bc);
+        const lc = it.depth === 0 ? 'muted' : bc;
+        it.noteSegs.forEach((s, i) => { // 每段內文各一個虛線框
+          const st = it.top + s.off, sc = s.b.crossLen + 2 * it.notePad;
+          const nr = mapR(it.noteM, st, s.b.mainLen + 2 * it.notePad, sc);
+          const nbox = Object.assign({ r: fs * 0.3, fill: 'noteBox', stroke: 'muted', sw: Math.max(1, fs * 0.05), dash: [fs * 0.3, fs * 0.2] }, nr);
+          Bx.push(nbox);
+          nbox.label = text(s.b, it.noteM + it.notePad, st + it.notePad, 'ink', 'start');
+          nbox.label.inBox = true; nbox.inset = { m: it.notePad, c: it.notePad };
+          if (!i) { leader(it.main + it.labelM + fs * 0.15, it.anchor, it.noteM - fs * 0.15, lc); return; }
+          const m0 = it.main + it.labelM, m1 = it.noteM, mid = (m0 + m1) / 2, a1 = st + Math.min(it.anchorOff, sc / 2);
+          Cs.push({ p: [].concat(mapP(m0, it.anchor), mapP(mid, it.anchor), mapP(mid, a1), mapP(m1, a1)), w: Math.max(1, fs * 0.06), color: lc });
+        });
       }
       for (const k of it.kids) {
         const m0 = it.main + it.ownM, m1 = k.main, mid = (m0 + m1) / 2;
@@ -1288,6 +1340,7 @@ function startEdit(id, isNew = false, field = 'text') {
     dockText.rows = field === 'note' ? 4 : 1;
     dockText.setAttribute('enterkeyhint', field === 'note' ? 'enter' : 'done');
     $$('[data-dock="sibling"],[data-dock="child"]').forEach((b) => { b.hidden = field === 'note'; });
+    $('[data-dock="para"]').hidden = field !== 'note';
     dock.hidden = false; autosizeDock();
   } else {
     inlineEd.hidden = false;
@@ -1374,6 +1427,7 @@ dockText.addEventListener('keydown', (e) => {
 dock.addEventListener('pointerdown', (e) => { if (e.target.closest('button')) e.preventDefault(); });
 dock.addEventListener('click', (e) => {
   const b = e.target.closest('[data-dock]'); if (!b || !state.editing) return;
+  if (b.dataset.dock === 'para') { addParagraph(dockText); autosizeDock(); return; }
   const id = state.editing.id, act = b.dataset.dock;
   commitEdit();
   const target = nodeOf(id) ? id : state.sel;
@@ -1685,6 +1739,20 @@ for (const [elId, key] of [['#fText', 'text'], ['#fNote', 'note']]) {
     n[key] = el.value; changed();
   });
 }
+// 在內文最後空一行、把游標移過去，接著打的字就是新的一段
+function addParagraph(el) {
+  const v = el.value.replace(/[ \t　\n]+$/, '');
+  el.value = v ? v + '\n\n' : '';
+  el.focus({ preventScroll: true }); el.setSelectionRange(el.value.length, el.value.length);
+  el.scrollTop = el.scrollHeight;
+}
+$('#btnAddPara').addEventListener('pointerdown', (e) => e.preventDefault()); // 不要讓內文框先失去焦點
+$('#btnAddPara').addEventListener('click', () => {
+  const n = state.sel && nodeOf(state.sel); if (!n) return;
+  const el = $('#fNote'); addParagraph(el);
+  if (el.value !== n.note) { pushHistory(); n.note = el.value; changed(); }
+  toast('請在內文框最後輸入新的一段');
+});
 
 // 版面設定
 function syncSettingsUI() {
@@ -1861,6 +1929,10 @@ const GD = {
     return files.map((f) => ({ id: (f.appProperties && f.appProperties.mapId) || f.id, fileId: f.id, title: f.name.replace(/\.json$/i, ''), updatedAt: Date.parse(f.modifiedTime) || 0 }));
   },
   async read(fileId) { return (await GD.api(`${GAPI}/${encodeURIComponent(fileId)}?alt=media`)).text(); },
+  async modified(fileId) { // 只問最後修改時間，用來判斷另一台裝置有沒有改過
+    const j = await (await GD.api(`${GAPI}/${encodeURIComponent(fileId)}?fields=modifiedTime`)).json();
+    return Date.parse(j.modifiedTime) || 0;
+  },
   async save(fileId, title, mapId, json) {
     const meta = { name: title + '.json', mimeType: 'application/json', appProperties: { kepan: '1', mapId } };
     if (!fileId) meta.parents = [await GD.folder()];
@@ -1962,37 +2034,90 @@ async function uploadLocalMaps() {
   updateAccountUI(); renderMapList(); toast(`已上傳 ${ok} 份科判`);
 }
 let gdRefreshAt = 0, gdRefreshing = false;
-async function gdRefresh() { // 回到這個分頁時，檢查其他電腦有沒有改過
-  if (state.mode !== 'gdrive' || !GD.valid() || gdRefreshing || Date.now() - gdRefreshAt < 8000) return;
+const busyUI = () => !!state.editing || !$('#exportModal').hidden || !$('#conflictModal').hidden;
+async function gdRefresh(force) { // 回到這個分頁時，檢查另一台裝置有沒有改過；回傳 'loaded'／'same'／'skip'
+  if (state.mode !== 'gdrive' || !GD.valid() || gdRefreshing || (!force && Date.now() - gdRefreshAt < 8000)) return 'skip';
   gdRefreshing = true; gdRefreshAt = Date.now();
   try {
     const list = await GD.list();
     state.maps = list; GD.files = new Map(list.map((x) => [x.id, x])); renderMapList();
     const cur = GD.files.get(state.map.id);
-    if (cur && cur.updatedAt > (state.map.updatedAt || 0) + 1000 && !state.dirty && !state.editing && !state.saving) {
+    if (cur && cur.updatedAt > (state.map.updatedAt || 0) + 1000 && !state.dirty && !state.saving && !busyUI()) {
       const cam = Object.assign({}, state.cam), sel = state.sel;
-      if (await openFromEntry(cur)) { state.cam = cam; if (sel && nodeOf(sel)) state.sel = sel; requestRender(); toast('已載入其他電腦的最新內容'); }
+      if (await openFromEntry(cur)) { state.cam = cam; if (sel && nodeOf(sel)) state.sel = sel; requestRender(); toast('已載入另一台裝置的最新內容'); return 'loaded'; }
     }
-  } catch (e) { if (e && e.code === 'auth') setChip('auth'); }
+    return 'same';
+  } catch (e) { if (e && e.code === 'auth') setChip('auth'); return 'skip'; }
   finally { gdRefreshing = false; }
 }
-window.addEventListener('focus', gdRefresh);
+window.addEventListener('focus', () => gdRefresh());
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') gdRefresh(); });
+// 兩台裝置同時開著時：每 20 秒問一次雲端硬碟這份有沒有被改過，有就自動載入（只問修改時間，很省流量）
+setInterval(async () => {
+  if (document.visibilityState !== 'visible' || state.mode !== 'gdrive' || !GD.valid() || state.dirty || state.saving || gdRefreshing || busyUI()) return;
+  const f = GD.files.get(state.map.id); if (!f || !f.fileId) return;
+  try { if ((await GD.modified(f.fileId)) > (state.map.updatedAt || 0) + 1000) gdRefresh(true); }
+  catch (e) { if (e && e.code === 'auth') setChip('auth'); }
+}, 20000);
+// 「立即同步」：先把這台的修改存上去，再把另一台的新內容抓下來
+let syncing = false;
+async function syncNow() {
+  if (syncing) return;
+  if (state.mode === 'gdrive' && !GD.valid()) { googleSignIn(); return; }
+  if (state.mode !== 'gdrive' && state.mode !== 'cloud') { toast('還沒登入，內容只存在這台裝置'); return; }
+  if (state.editing) commitEdit();
+  syncing = true; $('#btnSync').classList.add('spin');
+  try {
+    await new Promise((r) => { const t = setInterval(() => { if (!state.saving) { clearInterval(t); r(); } }, 120); });
+    if (state.dirty) { clearTimeout(state.saveT); await saveNow(); }
+    if (state.conflict) return; // 另一台也改過，交給對話框讓使用者選
+    if (state.dirty) { toast('還沒存好，稍後會自動再試'); return; }
+    const r = state.mode === 'gdrive' ? await gdRefresh(true) : 'same';
+    if (r === 'same') toast(state.mode === 'gdrive' ? '已同步，這台是最新的內容' : '已同步');
+  } finally { syncing = false; $('#btnSync').classList.remove('spin'); }
+}
+$('#btnSync').addEventListener('click', syncNow);
+// 存檔前發現另一台裝置改過：請使用者選要留哪一份
+let cfResolve = null;
+function askConflict() {
+  $('#conflictModal').hidden = false;
+  return new Promise((r) => { cfResolve = r; });
+}
+$('#conflictModal').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-cf]'); if (!b || !cfResolve) return;
+  $('#conflictModal').hidden = true; const r = cfResolve; cfResolve = null; r(b.dataset.cf);
+});
+async function resolveConflict() {
+  const pick = await askConflict();
+  state.conflict = false; clearTimeout(state.saveT);
+  if (pick === 'mine') { state.forceSave = true; state.dirty = true; saveNow(); return; }
+  if (pick === 'keep') { // 這台的內容另存一份新的，原本那份保留另一台的版本
+    const m = normalizeMap(JSON.parse(JSON.stringify(mapToJSON(state.map))));
+    m.id = rid('m'); m.name = displayTitle(m) + '（這台的版本）'; m.updatedAt = 0;
+    state.dirty = false; startNewMap(m); toast('已把這台的內容另存一份；原本那份保留另一台的版本');
+    return;
+  }
+  state.dirty = false; // 'theirs'：放棄這台還沒存上去的修改，改開雲端硬碟上的版本
+  try { const list = await GD.list(); state.maps = list; GD.files = new Map(list.map((x) => [x.id, x])); } catch (e) {}
+  const f = GD.files.get(state.map.id), cam = Object.assign({}, state.cam), sel = state.sel;
+  if (f && (await openFromEntry(f))) { state.cam = cam; if (sel && nodeOf(sel)) state.sel = sel; requestRender(); toast('已載入另一台裝置的版本'); }
+}
 function updateAccountUI() {
   if (!WEBSITE) return;
   const box = $('#accountBox'), note = $('#syncNote'), btn = $('#btnGoogle');
   box.hidden = false; box.textContent = '';
   const mk = (text, cls, fn) => { const b = document.createElement('button'); b.className = 'btn ' + cls; b.textContent = text; b.addEventListener('click', fn); return b; };
   if (state.mode === 'gdrive') {
-    note.textContent = `已用 ${(GD.user && GD.user.emailAddress) || 'Google 帳號'} 登入。科判會存到你的 Google 雲端硬碟「科判心智圖」資料夾，任何電腦登入同一個帳號都能接著改。`;
-    box.append(mk('登出', 'ghost', googleSignOut));
+    note.textContent = `已用 ${(GD.user && GD.user.emailAddress) || 'Google 帳號'} 登入。科判會存到你的 Google 雲端硬碟「科判心智圖」資料夾，任何電腦或 iPad 登入同一個帳號都能接著改。每次修改約 1 秒後自動存檔；另一台裝置開著時，大約 20 秒內會自動更新，也可以按「立即同步」。`;
+    box.append(mk('立即同步', 'ghost', syncNow), mk('登出', 'ghost', googleSignOut));
     const n = (state.localPending || []).length;
     if (n) {
       const p = document.createElement('p'); p.className = 'hint'; p.textContent = `這台電腦還有 ${n} 份科判沒有存到雲端硬碟。`;
       box.append(p, mk('全部上傳到雲端硬碟', 'ghost', uploadLocalMaps));
     }
-    btn.hidden = true;
+    btn.hidden = true; $('#btnSync').hidden = false;
   } else {
+    $('#btnSync').hidden = true;
     note.textContent = GCLIENT
       ? '還沒登入：內容只存在這台電腦的瀏覽器。用 Google 帳號登入後，科判會存到你自己的 Google 雲端硬碟，換電腦也能接著改。'
       : '網站管理者還沒設定 Google 登入，內容暫時只存在這台電腦的瀏覽器。';
@@ -2020,17 +2145,23 @@ function markDirty() {
 function payloadFor(m) { return { name: m.name || '', title: displayTitle(m), updatedAt: m.updatedAt, device: state.device, json: JSON.stringify(mapToJSON(m)) }; }
 function localAll() { try { return JSON.parse(LS.get('kepan.v1.maps') || '{}') || {}; } catch (e) { return {}; } }
 async function saveNow() {
-  if (state.mode === 'pending') return;
+  if (state.mode === 'pending' || state.conflict) return;
   if (state.saving) { state.saveAgain = true; return; }
   if (!state.dirty) return;
   state.saving = true; state.dirty = false; setChip('saving');
-  const m = state.map; m.updatedAt = Date.now();
+  const m = state.map, base = m.updatedAt || 0; m.updatedAt = Date.now();
   const payload = payloadFor(m);
   try {
     if (state.mode === 'cloud') await state.col.doc(m.id).set(payload);
     else if (state.mode === 'gdrive') {
-      const f = GD.files.get(m.id);
+      let f = GD.files.get(m.id);
+      if (f && f.fileId && !state.forceSave) { // 存檔前先確認：這台打開之後，另一台裝置有沒有改過
+        let rt = 0;
+        try { rt = await GD.modified(f.fileId); } catch (e) { if (e && e.status === 404) { GD.files.delete(m.id); f = null; } else throw e; }
+        if (rt > base + 1000) throw { code: 'conflict' };
+      }
       const e = await GD.save(f && f.fileId, displayTitle(m), m.id, payload.json);
+      state.forceSave = false;
       m.updatedAt = e.updatedAt; // 以雲端硬碟的時間為準，方便判斷別台電腦有沒有改過
       GD.files.set(m.id, e); state.maps = Array.from(GD.files.values()); renderMapList();
     } else {
@@ -2042,8 +2173,10 @@ async function saveNow() {
     setChip(state.dirty ? 'dirty' : 'saved');
   } catch (e) {
     state.dirty = true; setChip('error');
+    if (state.mode === 'gdrive') m.updatedAt = base; // 沒存上去，維持「上次和雲端一致」的時間
     const code = e && e.code;
-    if (code === 'unavailable' || code === 'resource_exhausted') { clearTimeout(state.saveT); state.saveT = setTimeout(saveNow, 2500 + Math.random() * 2000); }
+    if (code === 'conflict') { state.conflict = true; setChip('dirty'); resolveConflict(); }
+    else if (code === 'unavailable' || code === 'resource_exhausted') { clearTimeout(state.saveT); state.saveT = setTimeout(saveNow, 2500 + Math.random() * 2000); }
     else if (code === 'quota_exceeded') toast('雲端空間已滿，請刪除不用的科判後再試');
     else if (code === 'invalid_argument') toast(payload.json.length > 240000 ? '這份科判太大（超過 256 KB），請拆成兩份' : '沒有寫入權限，內容只存在此裝置');
     else if (code === 'local_full') toast('瀏覽器空間不足，請匯出備份檔');
@@ -2052,7 +2185,7 @@ async function saveNow() {
     else toast('儲存失敗，稍後會再試一次');
   } finally {
     state.saving = false;
-    if (state.saveAgain || state.dirty) { state.saveAgain = false; clearTimeout(state.saveT); state.saveT = setTimeout(saveNow, 600); }
+    if (!state.conflict && (state.saveAgain || state.dirty)) { state.saveAgain = false; clearTimeout(state.saveT); state.saveT = setTimeout(saveNow, 600); }
   }
 }
 window.addEventListener('pagehide', () => { if (state.dirty) mirrorDraft(); });
@@ -2101,6 +2234,7 @@ async function connectStorage() {
   if (db && uid) {
     state.mode = 'cloud';
     state.col = db.collection('data/users/' + uid);
+    $('#btnSync').hidden = false;
     $('#syncNote').textContent = '已連到你的帳號，內容會自動同步。在電腦或手機打開同一個連結，都能繼續編輯。';
     state.col.onSnapshot(onCloudSnapshot, (err) => {
       if (err && err.code === 'revoked') { state.mode = 'local'; toast('雲端連線已中斷，改存在此裝置'); }
@@ -2525,7 +2659,7 @@ function buildDocx(opt) {
     body += `<w:p><w:pPr><w:spacing w:before="0" w:after="240"/><w:jc w:val="center"/></w:pPr>${run(clean(outline.root.text), 32, true)}</w:p>`;
     if (outline.author) body += `<w:p><w:pPr><w:spacing w:before="0" w:after="240"/><w:jc w:val="right"/></w:pPr>${run(outline.author, 22)}</w:p>`;
     const walk = (n, d) => {
-      body += `<w:p><w:pPr><w:spacing w:before="0" w:after="80"/><w:ind w:left="${d * 480}"/></w:pPr>${run(clean(n.text), 24, d === 0)}${n.note.trim() ? run('　──　', 24, false, '888888') + run(n.note.trim().replace(/\n/g, ' '), 24) : ''}</w:p>`;
+      body += `<w:p><w:pPr><w:spacing w:before="0" w:after="80"/><w:ind w:left="${d * 480}"/></w:pPr>${run(clean(n.text), 24, d === 0)}${n.note.trim() ? run('　──　', 24, false, '888888') + run(noteSegments(n.note).map((s) => s.replace(/\n/g, ' ')).join('　／　'), 24) : ''}</w:p>`;
       n.children.forEach((c) => walk(c, d + 1));
     };
     outline.root.children.forEach((c) => walk(c, 0)); // 標題已在上方，從第二層開始
