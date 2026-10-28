@@ -42,7 +42,8 @@ button,input,select,textarea{font:inherit;color:inherit}
 .app{height:100%;display:flex;flex-direction:column}
 
 /* 工具列 */
-.topbar{flex:none;display:flex;align-items:center;gap:6px;min-height:54px;padding-block:8px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));background:var(--bar);border-bottom:1px solid var(--rule)}
+.topbar{flex:none;display:flex;align-items:center;gap:6px;min-height:54px;padding-block:8px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));background:var(--bar);border-bottom:1px solid var(--rule);overflow-x:auto;scrollbar-width:none}
+.topbar::-webkit-scrollbar{display:none} /* 萬一擠不下（例如 Safari 把網頁放大），可以左右滑動，按鈕不會被切掉 */
 .brand{display:flex;align-items:center;gap:8px;margin-right:2px;flex:none}
 .seal{width:28px;height:28px;display:grid;place-items:center;background:var(--accent);color:var(--on-accent);font:700 17px/1 var(--font-brand);border-radius:4px}
 .brand-name{font:700 17px/1 var(--font-brand);letter-spacing:.08em;white-space:nowrap}
@@ -203,7 +204,10 @@ button,input,select,textarea{font:inherit;color:inherit}
   .nb{min-width:48px}
 }
 @media (max-width: 900px){ .chip[data-s="auth"] span{display:inline} }
-@media (max-width: 680px){ .topbar .seg{display:none} } /* 手機太窄，切換放在「設定 → 版面」 */
+@media (max-width: 760px){ .seg button{padding:0 6px} }
+@media (max-width: 600px){ .topbar .seg{display:none} } /* 手機直放太窄，切換放在「設定 → 版面」；平板（含 Safari 放大網頁）都保留 */
+/* 觸控裝置：輸入框字小於 16px 時，iPad／iPhone 的 Safari 一點就自動放大整頁，轉向後工具列會跑出畫面 */
+@media (pointer: coarse){ input:not([type=checkbox]):not([type=radio]):not([type=range]),textarea,select{font-size:16px!important} }
 @media (max-width: 760px){ .chip[data-s="auth"]{display:inline-flex} }
 @media (prefers-reduced-motion: reduce){ *{transition:none!important;animation:none!important} }
 </style>
@@ -2699,6 +2703,17 @@ $('#exGo').addEventListener('click', async () => {
 
 /* ================= 版面與主題監聽 ================= */
 new ResizeObserver(() => { render(); if (state.editing && state.editing.dock) autosizeDock(); }).observe(wrap);
+/* iPad／手機：鍵盤收起或轉向後，Safari 有時把整頁往上捲或停在放大狀態，工具列就看不到了，這裡拉回原位 */
+function settleViewport(resetZoom) {
+  const ae = document.activeElement;
+  if (ae && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName)) return; // 正在打字（鍵盤開著）就不動
+  if (scrollX || scrollY) scrollTo(0, 0);
+  const vm = document.querySelector('meta[name="viewport"]'), vv = window.visualViewport;
+  if (resetZoom && vm && vv && vv.scale > 1.01) { const c = vm.content; vm.content = c + ',maximum-scale=1'; setTimeout(() => { vm.content = c; }, 300); }
+}
+addEventListener('orientationchange', () => setTimeout(() => settleViewport(true), 400));
+addEventListener('resize', () => setTimeout(() => settleViewport(false), 100));
+addEventListener('focusout', () => setTimeout(() => settleViewport(false), 300));
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { readPalette(); requestRender(); });
 new MutationObserver(() => { readPalette(); requestRender(); }).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'class', 'style'] });
 
