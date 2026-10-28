@@ -719,9 +719,17 @@ function computeLayout(map) {
   function placeCross(it) {
     const lc = it.hidden ? 0 : it.label.crossLen + 2 * it.padC;
     const nc = it.note ? it.note.crossLen + 2 * it.notePad : 0;
-    it.labelC = lc; it.noteC = nc; it.ownC = Math.max(lc, nc);
+    it.labelC = lc; it.noteC = nc;
     it.anchorOff = it.hidden ? 0 : kep ? it.pitch / 2 : lc / 2;
-    if (!it.kids.length) { it.topRel = 0; it.anchorRel = it.anchorOff; return it.ownC; }
+    // 好幾段內文時，標題放在第一段和最後一段的正中間（像括號），內文整塊相對標題往前挪 noteShift
+    it.noteShift = 0;
+    if (it.noteSegs && it.noteSegs.length > 1) {
+      const segs = it.noteSegs;
+      for (const s of segs) s.anchorRel = s.off + (kep ? it.pitch / 2 : (s.b.crossLen + 2 * it.notePad) / 2);
+      it.noteShift = it.anchorOff - (segs[0].anchorRel + segs[segs.length - 1].anchorRel) / 2;
+    }
+    it.ownLo = Math.min(0, it.noteShift); it.ownHi = Math.max(lc, it.noteShift + nc); // 標題＋內文佔的範圍（以標題頂端為 0）
+    if (!it.kids.length) { it.topRel = -it.ownLo; it.anchorRel = it.topRel + it.anchorOff; return it.ownHi - it.ownLo; }
     let y = 0, prev = null;
     for (const k of it.kids) {
       const ext = placeCross(k);
@@ -731,7 +739,7 @@ function computeLayout(map) {
     const f = it.kids[0], l = it.kids[it.kids.length - 1];
     const mid = (f.off + f.anchorRel + l.off + l.anchorRel) / 2;
     const top = mid - it.anchorOff;
-    const minTop = Math.min(0, top), maxBot = Math.max(y, top + it.ownC);
+    const minTop = Math.min(0, top + it.ownLo), maxBot = Math.max(y, top + it.ownHi);
     for (const k of it.kids) k.off -= minTop;
     it.topRel = top - minTop; it.anchorRel = mid - minTop;
     return maxBot - minTop;
@@ -808,16 +816,19 @@ function computeLayout(map) {
   }
 
   for (const it of items) {
-    if (!it.hidden) intervals.push([it.top, it.top + it.ownC]);
+    if (!it.hidden) intervals.push([it.top + it.ownLo, it.top + it.ownHi]);
+    const nt = it.top + it.noteShift; // 內文區塊的頂端
     if (kep) {
       if (!it.hidden) text(it.label, it.main, it.top, it.empty ? 'muted' : 'ink', 'start', it.empty ? { screenOnly: true } : null);
       if (it.note) {
-        for (const s of it.noteSegs) text(s.b, it.noteM, it.top + s.off, 'ink', 'start');
-        leader(it.main + it.labelM + fs * 0.25, it.anchor, it.noteM - fs * 0.3, 'ink');
-        if (it.noteSegs.length > 1) { // 好幾段內文：從標題的引線分岔，用括號線接到每一段
-          const sp = it.main + it.labelM + fs * 0.75, segA = (s) => it.top + s.off + it.pitch / 2;
-          line(sp, it.anchor, sp, segA(it.noteSegs[it.noteSegs.length - 1]), lw, 'ink', null, 'square');
-          for (const s of it.noteSegs.slice(1)) leader(sp + fs * 0.25, segA(s), it.noteM - fs * 0.3, 'ink');
+        const segs = it.noteSegs;
+        for (const s of segs) text(s.b, it.noteM, nt + s.off, 'ink', 'start');
+        if (segs.length < 2) leader(it.main + it.labelM + fs * 0.25, it.anchor, it.noteM - fs * 0.3, 'ink');
+        else { // 好幾段內文：標題在中間，接一條括號線，再用引線分到每一段
+          const sp = it.main + it.labelM + fs * 0.75;
+          line(it.main + it.labelM + tgap, it.anchor, sp, it.anchor, lw, 'ink', null, 'square');
+          line(sp, nt + segs[0].anchorRel, sp, nt + segs[segs.length - 1].anchorRel, lw, 'ink', null, 'square');
+          for (const s of segs) leader(sp + fs * 0.15, nt + s.anchorRel, it.noteM - fs * 0.3, 'ink');
         }
       }
       if (it.kids.length) {
@@ -840,15 +851,16 @@ function computeLayout(map) {
       box.label.inBox = true; box.inset = { m: it.padM, c: it.padC };
       if (it.note) {
         const lc = it.depth === 0 ? 'muted' : bc;
-        it.noteSegs.forEach((s, i) => { // 每段內文各一個虛線框
-          const st = it.top + s.off, sc = s.b.crossLen + 2 * it.notePad;
+        const multi = it.noteSegs.length > 1;
+        it.noteSegs.forEach((s) => { // 每段內文各一個虛線框
+          const st = nt + s.off, sc = s.b.crossLen + 2 * it.notePad;
           const nr = mapR(it.noteM, st, s.b.mainLen + 2 * it.notePad, sc);
           const nbox = Object.assign({ r: fs * 0.3, fill: 'noteBox', stroke: 'muted', sw: Math.max(1, fs * 0.05), dash: [fs * 0.3, fs * 0.2] }, nr);
           Bx.push(nbox);
           nbox.label = text(s.b, it.noteM + it.notePad, st + it.notePad, 'ink', 'start');
           nbox.label.inBox = true; nbox.inset = { m: it.notePad, c: it.notePad };
-          if (!i) { leader(it.main + it.labelM + fs * 0.15, it.anchor, it.noteM - fs * 0.15, lc); return; }
-          const m0 = it.main + it.labelM, m1 = it.noteM, mid = (m0 + m1) / 2, a1 = st + Math.min(it.anchorOff, sc / 2);
+          if (!multi) { leader(it.main + it.labelM + fs * 0.15, it.anchor, it.noteM - fs * 0.15, lc); return; }
+          const m0 = it.main + it.labelM, m1 = it.noteM, mid = (m0 + m1) / 2, a1 = nt + s.anchorRel;
           Cs.push({ p: [].concat(mapP(m0, it.anchor), mapP(mid, it.anchor), mapP(mid, a1), mapP(m1, a1)), w: Math.max(1, fs * 0.06), color: lc });
         });
       }
@@ -859,7 +871,7 @@ function computeLayout(map) {
       }
     }
     if (!it.hidden) it.rect = mapR(it.main, it.top, it.labelM, it.labelC);
-    if (it.note) it.noteRect = mapR(it.noteM, it.top, it.note.mainLen + 2 * it.notePad, it.noteC);
+    if (it.note) it.noteRect = mapR(it.noteM, nt, it.note.mainLen + 2 * it.notePad, it.noteC);
     it.togglePt = mapP(it.main + it.labelM + fs * 0.5, it.anchor);
   }
   if (root.hidden && !root.rect) root.rect = mapR(0, 0, fs * 4, fs);
