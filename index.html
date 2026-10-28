@@ -582,6 +582,34 @@ function charKind(ch) {
   if (c >= 0x2000 && c <= 0x206F) return 'r';
   return 'c';
 }
+// 直排時，中文裡用英文輸入法打的半形標點（, : ; ! ? ( )）會被當成英文橫躺，看起來很怪；跟在中文後面的就改用全形顯示
+const HALF2FULL = { ',': '，', ':': '：', ';': '；', '!': '！', '?': '？', '(': '（', ')': '）', '､': '、', '｡': '。', '｢': '「', '｣': '」' };
+const isHanCh = (ch) => !!ch && charKind(ch) === 'c' || ROT.has(ch);
+function fullPunct(s) {
+  const a = Array.from(s);
+  for (let i = 0; i < a.length; i++) {
+    const f = HALF2FULL[a[i]]; if (!f) continue;
+    if (a[i].charCodeAt(0) > 0xff) { a[i] = f; continue; } // 半形片假名區的 ､｡｢｣ 一律換
+    let p = i - 1; while (p >= 0 && a[p] === ' ') p--;
+    let n = i + 1; while (n < a.length && a[n] === ' ') n++;
+    if (a[i] === '(' ? isHanCh(a[n]) : isHanCh(a[p])) a[i] = f; // 「P.207, P.434」「1:2」這類英數字裡的保持原樣
+  }
+  return a.join('');
+}
+// 直排的全形標點放在字格正中間（台灣的標點寫法）；不同字型的標點位置不一樣，這裡量出字形實際的位置再補正
+const PUNCT_C = new Set(Array.from('，。、；：！？'));
+const pCache = new Map();
+function punctShift(fam, w, ch) {
+  const k = fam + w + ch; let v = pCache.get(k);
+  if (!v) {
+    mctx.font = fontCss(fam, w, 100); mctx.textAlign = 'center';
+    const m = mctx.measureText(ch), r = cratio(fam, w);
+    const ok = [m.actualBoundingBoxLeft, m.actualBoundingBoxRight, m.actualBoundingBoxAscent, m.actualBoundingBoxDescent].every(isFinite);
+    v = ok ? [(m.actualBoundingBoxLeft - m.actualBoundingBoxRight) / 200, (m.actualBoundingBoxAscent - m.actualBoundingBoxDescent) / 200 - r] : [0, 0];
+    mctx.textAlign = 'start'; pCache.set(k, v);
+  }
+  return v;
+}
 function tokenize(str) {
   const out = []; let run = '';
   for (const ch of str) {
@@ -605,7 +633,8 @@ function layoutText(text, o) {
   const max = o.max > 0 ? o.max : Infinity;
   const ls = (o.ls || 0) * size;
   const lines = [];
-  for (const para of String(text).split('\n')) {
+  for (let para of String(text).split('\n')) {
+    if (orient === 'v') para = fullPunct(para);
     const units = [];
     for (const u of tokenize(para)) {
       const adv = unitAdv(u, fam, weight, size, orient);
@@ -901,7 +930,11 @@ function drawBlock(ctx, L, t, pal) {
       const x = L.C - (t.top + (i + 0.5) * b.pitch), y0 = t.starts[i];
       for (const u of ln.units) {
         if (u.k === 's') continue;
-        if (u.k === 'c') { ctx.textAlign = 'center'; ctx.fillText(u.t, x, y0 + u.off + u.adv / 2 + ratio); }
+        if (u.k === 'c') {
+          const d = PUNCT_C.has(u.t) ? punctShift(b.fam, b.weight, u.t) : null;
+          ctx.textAlign = 'center';
+          ctx.fillText(u.t, x + (d ? d[0] * b.size : 0), y0 + u.off + u.adv / 2 + ratio + (d ? d[1] * b.size : 0));
+        }
         else {
           ctx.save(); ctx.translate(x, y0 + u.off); ctx.rotate(Math.PI / 2);
           ctx.textAlign = 'left'; ctx.fillText(u.t, 0, ratio); ctx.restore();
@@ -2667,11 +2700,12 @@ function buildDocx(opt) {
   if (outline) {
     const f = xmlEsc(outline.font);
     const run = (t, sz, b, color) => `<w:r><w:rPr><w:rFonts w:ascii="${f}" w:hAnsi="${f}" w:eastAsia="${f}"/>${b ? '<w:b/>' : ''}<w:noProof/>${color ? `<w:color w:val="${color}"/>` : ''}<w:sz w:val="${sz}"/><w:szCs w:val="${sz}"/><w:lang w:val="zh-TW" w:eastAsia="zh-TW"/></w:rPr><w:t xml:space="preserve">${xmlEsc(t)}</w:t></w:r>`;
-    const clean = (s) => s.replace(/\n/g, '');
+    const fp = (s) => (outline.vertical ? fullPunct(s) : s); // 直書大綱也把中文裡的半形標點改全形
+    const clean = (s) => fp(s.replace(/\n/g, ''));
     body += `<w:p><w:pPr><w:spacing w:before="0" w:after="240"/><w:jc w:val="center"/></w:pPr>${run(clean(outline.root.text), 32, true)}</w:p>`;
     if (outline.author) body += `<w:p><w:pPr><w:spacing w:before="0" w:after="240"/><w:jc w:val="right"/></w:pPr>${run(outline.author, 22)}</w:p>`;
     const walk = (n, d) => {
-      body += `<w:p><w:pPr><w:spacing w:before="0" w:after="80"/><w:ind w:left="${d * 480}"/></w:pPr>${run(clean(n.text), 24, d === 0)}${n.note.trim() ? run('　──　', 24, false, '888888') + run(noteSegments(n.note).map((s) => s.replace(/\n/g, ' ')).join('　／　'), 24) : ''}</w:p>`;
+      body += `<w:p><w:pPr><w:spacing w:before="0" w:after="80"/><w:ind w:left="${d * 480}"/></w:pPr>${run(clean(n.text), 24, d === 0)}${n.note.trim() ? run('　──　', 24, false, '888888') + run(fp(noteSegments(n.note).map((s) => s.replace(/\n/g, ' ')).join('　／　')), 24) : ''}</w:p>`;
       n.children.forEach((c) => walk(c, d + 1));
     };
     outline.root.children.forEach((c) => walk(c, 0)); // 標題已在上方，從第二層開始
