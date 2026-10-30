@@ -91,6 +91,17 @@ button,input,select,textarea{font:inherit;color:inherit}
 .zoombox .btn{height:30px}
 .zoombox .btn.icon{width:30px}
 #zoomPct{min-width:52px;font-size:12.5px;font-variant-numeric:tabular-nums;color:var(--ink-2)}
+/* 鎖定版面：只能捲動、縮放，所有修改的按鈕與欄位都停用 */
+#btnLock{padding:0 8px;gap:4px}
+#btnLock .lbl{display:none;font-size:12.5px}
+body.locked #btnLock{background:var(--accent-weak);color:var(--accent)}
+body.locked #btnLock .lbl{display:inline}
+body.locked .nodebar,body.locked #btnDraft{display:none}
+.seg button[disabled]{opacity:.45;cursor:default}
+.lock-note{display:none;margin:0;padding:8px 10px;border-radius:6px;background:var(--accent-weak);color:var(--accent);font-size:12.5px;line-height:1.6}
+body.locked .lock-note{display:block}
+.panel .lock-note{margin:12px 16px 0}
+.outline .lock-note{margin:0 16px 10px}
 .nodebar{position:absolute;left:50%;transform:translateX(-50%);bottom:calc(14px + env(safe-area-inset-bottom,0px));display:flex;gap:1px;padding:4px;background:var(--bar);border:1px solid var(--rule);border-radius:11px;box-shadow:var(--shadow);max-width:calc(100% - 24px);overflow-x:auto;z-index:4;scrollbar-width:none}
 .nodebar::-webkit-scrollbar{display:none}
 .nb{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;min-width:52px;height:48px;padding:0 6px;border:0;border-radius:7px;background:transparent;font-size:11.5px;color:var(--ink);cursor:pointer;flex:none;white-space:nowrap}
@@ -244,6 +255,7 @@ button,input,select,textarea{font:inherit;color:inherit}
     <aside class="outline" id="outlinePane" hidden aria-label="大綱編輯">
       <div class="pane-head"><h2>大綱編輯</h2><button class="btn icon" id="btnOutlineClose" aria-label="關閉大綱"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
       <p class="pane-tip">每行一項，按 <code>Tab</code> 縮排成下一層、<code>Shift+Tab</code> 退回上一層。<code>｜</code> 後面是內文（經文）。標題要換行請打 <code>\n</code>。</p>
+      <p class="lock-note">版面已鎖定，大綱只能看、不能改。</p>
       <textarea id="outlineText" spellcheck="false" aria-label="大綱文字"></textarea>
     </aside>
 
@@ -266,6 +278,7 @@ button,input,select,textarea{font:inherit;color:inherit}
         <button class="btn icon zoom-step" id="btnZoomIn" aria-label="放大"><svg viewBox="0 0 24 24"><path d="M6 12h12M12 6v12"/></svg></button>
         <button class="btn" id="btnFit" title="顯示全部">全覽</button>
         <button class="btn" id="btnDraft" title="新增一棵草稿樹（也可以在空白處雙擊）">＋草稿</button>
+        <button class="btn" id="btnLock" aria-pressed="false" aria-label="鎖定版面" title="鎖定版面：鎖住後只能捲動與縮放，不會不小心改到"><svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path id="lockShackle" d="M8 11V8a4 4 0 0 1 7.6-1.8"/></svg><span class="lbl">已鎖定</span></button>
       </div>
       <div class="nodebar" id="nodebar" role="toolbar" aria-label="項目操作">
         <button class="nb" data-act="child" title="新增下一層（Tab）"><svg viewBox="0 0 24 24"><path d="M5 5v8a3 3 0 0 0 3 3h11"/><path d="m15 12 4 4-4 4"/></svg>下一層</button>
@@ -288,6 +301,7 @@ button,input,select,textarea{font:inherit;color:inherit}
         <button class="tab" role="tab" id="tabLayout" aria-selected="false" data-tab="layout">版面</button>
         <button class="btn icon only-narrow" id="btnPanelClose" aria-label="關閉"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
       </div>
+      <p class="lock-note">版面已鎖定，現在只能看、不能改。要修改請先按畫面右上角的鎖頭解除。</p>
       <div class="panel-body" id="paneNode">
         <p class="hint" id="nodeEmpty">點選圖上的項目即可編輯，雙擊項目可以直接改字。<br>在空白處雙擊，可以新增一棵獨立的草稿樹。</p>
         <p class="hint draft-hint" id="draftHint" hidden>這是草稿樹裡的項目，匯出時預設不包含。拖曳草稿的第一項可以移動整棵樹；拖到主圖的項目上，就會併入成為分支。</p>
@@ -1275,8 +1289,8 @@ function restoreSnap(s) {
   if (state.sel && !nodeOf(state.sel)) state.sel = null;
   changed({ skipIndex: true, all: true });
 }
-function undo() { if (state.editing) commitEdit(); if (!state.hist.length) return; state.fut.push(snap()); restoreSnap(state.hist.pop()); }
-function redo() { if (state.editing) commitEdit(); if (!state.fut.length) return; state.hist.push(snap()); restoreSnap(state.fut.pop()); }
+function undo() { if (state.locked) return lockedHint(); if (state.editing) commitEdit(); if (!state.hist.length) return; state.fut.push(snap()); restoreSnap(state.hist.pop()); }
+function redo() { if (state.locked) return lockedHint(); if (state.editing) commitEdit(); if (!state.fut.length) return; state.hist.push(snap()); restoreSnap(state.fut.pop()); }
 
 function changed(o = {}) {
   if (!o.skipIndex) rebuildIndex();
@@ -1382,6 +1396,7 @@ function pasteText(text) {
 /* ================= 文字編輯 ================= */
 function startEdit(id, isNew = false, field = 'text') {
   const n = nodeOf(id); if (!n) return;
+  if (state.locked) { lockedHint(); return; }
   if (state.editing) commitEdit();
   if (state.L && !state.L.byId.has(id)) return;
   state.sel = id;
@@ -1541,6 +1556,8 @@ cv.addEventListener('pointerdown', (e) => {
     state.drag = null; state.pan = null; requestRender();
     return;
   }
+  // 鎖定時按在哪裡都只是捲動畫面，不會選取、拖曳或收合
+  if (state.locked) { state.pan = { sx, sy, cx: state.cam.x, cy: state.cam.y, moved: false }; return; }
   const [wx, wy] = s2w(sx, sy);
   const hit = hitTest(wx, wy);
   if (hit && hit.part === 'toggle') { toggleFold(hit.it.id); state.pan = null; state.drag = null; return; }
@@ -1591,7 +1608,7 @@ cv.addEventListener('pointermove', (e) => {
     }
     return;
   }
-  if (e.pointerType === 'mouse') {
+  if (e.pointerType === 'mouse' && !state.locked) {
     const [wx, wy] = s2w(sx, sy), hit = hitTest(wx, wy), id = hit ? hit.it.id : null;
     cv.classList.toggle('over-node', !!hit);
     if (id !== state.hover) { state.hover = id; requestRender(); }
@@ -1622,9 +1639,9 @@ function endPointer(e) {
     const p = state.pan; state.pan = null;
     if (!p.moved && e.type === 'pointerup') {
       select(null);
-      if (e.pointerType !== 'mouse') { // 觸控：空白處點兩下＝新增草稿樹
+      if (e.pointerType !== 'mouse') { // 觸控：空白處點兩下＝新增草稿樹（鎖定時只提醒）
         const now = Date.now(), lt = state.lastEmptyTap;
-        if (lt && now - lt.t < 380 && Math.hypot(lt.sx - p.sx, lt.sy - p.sy) < 30) { state.lastEmptyTap = null; const [wx, wy] = s2w(p.sx, p.sy); createDraftAt(wx, wy); }
+        if (lt && now - lt.t < 380 && Math.hypot(lt.sx - p.sx, lt.sy - p.sy) < 30) { state.lastEmptyTap = null; if (state.locked) lockedHint(); else { const [wx, wy] = s2w(p.sx, p.sy); createDraftAt(wx, wy); } }
         else state.lastEmptyTap = { t: now, sx: p.sx, sy: p.sy };
       }
     }
@@ -1635,6 +1652,7 @@ cv.addEventListener('pointercancel', endPointer);
 cv.addEventListener('pointerleave', (e) => { if (e.pointerType === 'mouse' && state.hover && !state.drag) { state.hover = null; requestRender(); } });
 cv.addEventListener('dblclick', (e) => {
   if (state.lastPointerType && state.lastPointerType !== 'mouse') return; // 觸控的點兩下由 endPointer 處理
+  if (state.locked) { lockedHint(); return; }
   const [sx, sy] = localPt(e), [wx, wy] = s2w(sx, sy), hit = hitTest(wx, wy);
   if (hit && hit.part === 'node') startEdit(hit.it.id);
   else if (!hit) createDraftAt(wx, wy);
@@ -1689,6 +1707,10 @@ window.addEventListener('keydown', (e) => {
   if (mod && k === '-') { e.preventDefault(); zoomAt(1 / 1.2, wrap.clientWidth / 2, wrap.clientHeight / 2); return; }
   if (mod && k === '0') { e.preventDefault(); fitView(); return; }
   if (t !== cv && t !== document.body && t !== document.documentElement) return;
+  if (state.locked) {
+    if (['Tab', 'Enter', 'Delete', 'Backspace', 'F2', ' ', '/'].includes(k)) { e.preventDefault(); lockedHint(); }
+    return;
+  }
   const id = state.sel;
   const O = state.map.settings.orient;
   const arrows = O === 'h'
@@ -1713,13 +1735,13 @@ document.addEventListener('copy', (e) => {
   e.preventDefault(); e.clipboardData.setData('text/plain', serializeOutline(nodeOf(state.sel))); toast('已複製（含下層）');
 });
 document.addEventListener('cut', (e) => {
-  if (!canvasHasFocus() || !state.sel || state.sel === state.map.root.id) return;
+  if (state.locked || !canvasHasFocus() || !state.sel || state.sel === state.map.root.id) return;
   e.preventDefault(); e.clipboardData.setData('text/plain', serializeOutline(nodeOf(state.sel))); removeNode(state.sel); toast('已剪下');
 });
 document.addEventListener('paste', (e) => {
   if (!canvasHasFocus() || state.editing) return;
   const txt = e.clipboardData && e.clipboardData.getData('text/plain');
-  if (txt && txt.trim()) { e.preventDefault(); pasteText(txt); }
+  if (txt && txt.trim()) { e.preventDefault(); if (state.locked) lockedHint(); else pasteText(txt); }
 });
 function canvasHasFocus() { const a = document.activeElement; return a === cv || a === document.body || a === null; }
 
@@ -1737,11 +1759,11 @@ function updateButtons() {
   $('#lblDown').textContent = v ? '往左' : '往下';
   $('#icUp').style.transform = v ? 'rotate(90deg)' : '';
   $('#icDown').style.transform = v ? 'rotate(90deg)' : '';
-  $('#btnUndo').disabled = !state.hist.length;
-  $('#btnRedo').disabled = !state.fut.length;
+  $('#btnUndo').disabled = state.locked || !state.hist.length;
+  $('#btnRedo').disabled = state.locked || !state.fut.length;
 }
 $('#nodebar').addEventListener('click', (e) => {
-  const b = e.target.closest('.nb'); if (!b || b.disabled) return;
+  const b = e.target.closest('.nb'); if (!b || b.disabled || state.locked) return;
   const id = state.sel; if (!id) return;
   switch (b.dataset.act) {
     case 'child': addChild(id); break;
@@ -1760,7 +1782,34 @@ $('#btnZoomIn').addEventListener('click', () => zoomAt(1.2, wrap.clientWidth / 2
 $('#btnZoomOut').addEventListener('click', () => zoomAt(1 / 1.2, wrap.clientWidth / 2, wrap.clientHeight / 2));
 $('#zoomPct').addEventListener('click', () => zoomAt(1 / state.cam.z, wrap.clientWidth / 2, wrap.clientHeight / 2));
 $('#btnFit').addEventListener('click', () => fitView());
-$('#btnDraft').addEventListener('click', () => { const [wx, wy] = s2w(wrap.clientWidth / 2, wrap.clientHeight * 0.4); createDraftAt(wx, wy); });
+$('#btnDraft').addEventListener('click', () => { if (state.locked) return; const [wx, wy] = s2w(wrap.clientWidth / 2, wrap.clientHeight * 0.4); createDraftAt(wx, wy); });
+
+/* ================= 鎖定版面 ================= */
+// 鎖住後只能捲動、縮放、匯出與同步，所有會改到內容的操作都擋下來；每台裝置各自記住
+const LOCK_CTRLS = '#paneNode textarea, #paneNode select, #paneNode button, #paneLayout input, #paneLayout select, #paneLayout textarea, .seg[data-setting] button';
+function lockedHint() {
+  const now = Date.now(); if (now - (state.lockHintAt || 0) < 2500) return;
+  state.lockHintAt = now; toast('版面已鎖定，要修改請先按右上角的鎖頭解除');
+}
+function setLocked(on, quiet) {
+  on = !!on;
+  if (on && state.editing) commitEdit();
+  if (on && document.activeElement && document.activeElement.closest && document.activeElement.closest('#panel, #outlinePane, .topbar')) document.activeElement.blur();
+  state.locked = on;
+  document.body.classList.toggle('locked', on);
+  const b = $('#btnLock');
+  b.setAttribute('aria-pressed', String(on));
+  b.setAttribute('aria-label', on ? '解除鎖定' : '鎖定版面');
+  b.title = on ? '已鎖定：按一下解除，就可以修改' : '鎖定版面：鎖住後只能捲動與縮放，不會不小心改到';
+  $('#lockShackle').setAttribute('d', on ? 'M8 11V8a4 4 0 0 1 8 0v3' : 'M8 11V8a4 4 0 0 1 7.6-1.8');
+  $$(LOCK_CTRLS).forEach((el) => { el.disabled = on; });
+  nameInput.readOnly = on; outlineTA.readOnly = on;
+  if (on) { state.hover = null; cv.classList.remove('over-node'); select(null); }
+  syncSettingsUI(); updateButtons(); requestRender();
+  savePrefs({ locked: on });
+  if (!quiet) toast(on ? '已鎖定版面，現在只能捲動與縮放' : '已解除鎖定，可以修改了');
+}
+$('#btnLock').addEventListener('click', () => setLocked(!state.locked));
 
 function openPanel(tab) {
   $('#panel').hidden = false; setTab(tab || state.panelTab);
@@ -1838,7 +1887,7 @@ function syncSettingsUI() {
   });
   $('#oSize').textContent = S.fontSize; $('#oLine').textContent = (+S.lineHeight).toFixed(1);
   $$('[data-meta]').forEach((el) => { if (document.activeElement !== el) el.value = state.map.meta[el.dataset.meta]; });
-  $('#sRootTitle').disabled = S.style !== 'kepan';
+  $('#sRootTitle').disabled = state.locked || S.style !== 'kepan';
 }
 function applySetting(key, val) {
   const S = state.map.settings;
@@ -1850,7 +1899,7 @@ function applySetting(key, val) {
   if (key === 'orient' && before.orient !== val) fitView('start');
 }
 $$('.seg[data-setting]').forEach((g) => g.addEventListener('click', (e) => {
-  const b = e.target.closest('button[data-v]'); if (!b) return;
+  const b = e.target.closest('button[data-v]'); if (!b || state.locked) return;
   if (state.map.settings[g.dataset.setting] === b.dataset.v) return;
   pushHistory(); applySetting(g.dataset.setting, b.dataset.v);
 }));
@@ -2941,6 +2990,7 @@ function boot() {
   if (narrow() || prefs.panel === false || (prefs.panel === undefined && innerWidth <= 900)) $('#panel').hidden = true;
   setTab('node');
   updateButtons();
+  if (prefs.locked) setLocked(true, true);
   connectStorage();
   requestAnimationFrame(() => fitView('start'));
 }
