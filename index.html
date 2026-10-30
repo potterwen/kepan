@@ -179,6 +179,7 @@ button,input,select,textarea{font:inherit;color:inherit}
 .btn.spin svg{animation:kspin .9s linear infinite}
 @keyframes kspin{to{transform:rotate(360deg)}}
 .add-para{margin-top:8px}
+#wrapBox:not([hidden]){display:flex;flex-direction:column;gap:6px;margin-top:12px}
 .modal-card.small{width:min(480px,100%);height:auto;border-radius:12px;border:1px solid var(--rule)}
 #conflictModal{padding:16px}
 .cf-list{margin:0;padding-left:20px;font-size:13.5px;line-height:1.75;color:var(--ink-2)}
@@ -292,6 +293,10 @@ button,input,select,textarea{font:inherit;color:inherit}
         <p class="hint draft-hint" id="draftHint" hidden>這是草稿樹裡的項目，匯出時預設不包含。拖曳草稿的第一項可以移動整棵樹；拖到主圖的項目上，就會併入成為分支。</p>
         <div id="nodeForm" hidden>
           <label class="field">標題<textarea id="fText" rows="2" spellcheck="false"></textarea></label>
+          <div id="wrapBox">
+            <label class="row wrap-row"><span>標題換行</span><select id="fWrap"><option value="">依版面設定</option><option value="0">不自動換行</option></select></label>
+            <p class="hint">只影響這一項。想在某個字後面換行，在上面的標題框按 Enter；在圖上直接改字時按 Shift＋Enter。</p>
+          </div>
         </div>
         <div id="nodeForm2" hidden>
           <label class="field"><span>內文（經文、出處或說明）<br><small>顯示在標題後方，以引線相連；在科判樣式會對齊成一欄。同一項要放好幾段內文，按下面的按鈕，或在兩段中間空一行。</small></span><textarea id="fNote" rows="8" spellcheck="false"></textarea></label>
@@ -453,7 +458,9 @@ function normalizeMap(m) {
     n = n || {};
     const id = (typeof n.id === 'string' && /^[\w-]{3,40}$/.test(n.id) && !seen.has(n.id)) ? n.id : rid('n');
     seen.add(id);
-    return { id, text: String(n.text ?? ''), note: String(n.note ?? ''), collapsed: !!n.collapsed, children: Array.isArray(n.children) ? n.children.map(fix) : [] };
+    const out = { id, text: String(n.text ?? ''), note: String(n.note ?? ''), collapsed: !!n.collapsed, children: Array.isArray(n.children) ? n.children.map(fix) : [] };
+    if (n.wrap != null && n.wrap !== '' && isFinite(+n.wrap)) out.wrap = clamp(Math.round(+n.wrap), 0, 99); // 這一項自己的標題每行字數（0＝不自動換行）
+    return out;
   };
   return {
     id: (typeof m.id === 'string' && /^[\w-]{3,60}$/.test(m.id)) ? m.id : rid('m'),
@@ -549,6 +556,7 @@ function parseOutline(text) {
 function mergeIds(nr, or) { // 依位置保留原本的 id 與收合狀態
   if (!or) return;
   nr.id = or.id; nr.collapsed = or.collapsed && nr.children.length > 0;
+  if (or.wrap != null) nr.wrap = or.wrap;
   nr.children.forEach((c, i) => mergeIds(c, or.children[i]));
 }
 
@@ -590,9 +598,14 @@ function fullPunct(s) {
   for (let i = 0; i < a.length; i++) {
     const f = HALF2FULL[a[i]]; if (!f) continue;
     if (a[i].charCodeAt(0) > 0xff) { a[i] = f; continue; } // 半形片假名區的 ､｡｢｣ 一律換
-    let p = i - 1; while (p >= 0 && a[p] === ' ') p--;
-    let n = i + 1; while (n < a.length && a[n] === ' ') n++;
-    if (a[i] === '(' ? isHanCh(a[n]) : isHanCh(a[p])) a[i] = f; // 「P.207, P.434」「1:2」這類英數字裡的保持原樣
+    const sp = (j) => a[j] === ' ' || a[j] === '';
+    let p = i - 1; while (p >= 0 && sp(p)) p--;
+    let n = i + 1; while (n < a.length && sp(n)) n++;
+    if (!(a[i] === '(' ? isHanCh(a[n]) : isHanCh(a[p]))) continue; // 「P.207, P.434」「1:2」這類英數字裡的保持原樣
+    a[i] = f;
+    // 英文習慣在逗號後面空一格；改成全形後，夾在中文之間的空格要拿掉，不然會多佔位置、提早換行
+    if (isHanCh(a[p])) for (let j = p + 1; j < i; j++) a[j] = '';
+    if (isHanCh(a[n])) for (let j = i + 1; j < n; j++) a[j] = '';
   }
   return a.join('');
 }
@@ -704,7 +717,8 @@ function computeLayout(map) {
     }
     if (!it.hidden) {
       it.empty = !n.text.trim();
-      it.label = layoutText(it.empty ? '（空白）' : n.text, { fam, weight: it.weight, size: it.size, orient: O, max: S.labelWrap > 0 ? S.labelWrap * it.size : 0, pitch: it.pitch });
+      const lw = Number.isFinite(n.wrap) ? n.wrap : S.labelWrap; // 這一項有自己的設定就用自己的
+      it.label = layoutText(it.empty ? '（空白）' : n.text, { fam, weight: it.weight, size: it.size, orient: O, max: lw > 0 ? lw * it.size : 0, pitch: it.pitch });
       const segs = noteSegments(n.note);
       if (segs.length) {
         // 內文中間空一行，就分成好幾段，每段各自排成一塊、各有引線（沿交叉軸依序排開）
@@ -1774,7 +1788,22 @@ function syncNodePanel() {
   const ft = $('#fText'), fn = $('#fNote');
   if (document.activeElement !== ft) ft.value = n.text;
   if (document.activeElement !== fn) fn.value = n.note;
+  // 標題換行：最上層當頁首標題時不會換行，就不顯示
+  $('#wrapBox').hidden = !!hiddenRoot;
+  const fw = $('#fWrap'), gw = state.map.settings.labelWrap;
+  fw.options[0].textContent = '依版面設定（' + (gw > 0 ? '每行 ' + gw + ' 字' : '不自動換行') + '）';
+  const v = Number.isFinite(n.wrap) ? String(n.wrap) : '';
+  if (v && ![...fw.options].some((o) => o.value === v)) fw.add(new Option('每行 ' + v + ' 字', v));
+  fw.value = v;
 }
+for (const k of [6, 8, 10, 12, 14, 16, 18, 20, 24, 30, 40]) $('#fWrap').add(new Option('每行 ' + k + ' 字', String(k)));
+$('#fWrap').addEventListener('change', () => {
+  const n = state.sel && nodeOf(state.sel); if (!n) return;
+  pushHistory();
+  const v = $('#fWrap').value;
+  if (v === '') delete n.wrap; else n.wrap = +v;
+  changed();
+});
 for (const [elId, key] of [['#fText', 'text'], ['#fNote', 'note']]) {
   const el = $(elId);
   el.addEventListener('focus', () => { nodeHistArmed = true; });
